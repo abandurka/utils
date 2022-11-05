@@ -1,57 +1,84 @@
 param 
 (
     # Путь к папке с репозиторием
-    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidateNotNullOrEmpty()]
+    [Parameter(Mandatory = $true)]
     [string] $workingFolder,
-    # Имя тестовой ветки
-    [Parameter(Mandatory = $true, Position = 1)]
-    [string] $testBranchName
+
+    # Url до репы
+    [ValidateNotNullOrEmpty()]
+    [Parameter(Mandatory = $true)]
+    [string] $repoAddress,
+
+    # Пакеты для обновления
+    [Parameter(Mandatory = $false)]
+    [string[]] $includingPackages,
+
+    # Префикс бранчи
+    [Parameter(Mandatory = $false)]
+    [string] $testBranchPrefix
 )
 
-$targetBranch = "master"
+. $PSScriptRoot/common_functions.ps1
+
+$includingPackagesString = New-Object Collections.Generic.List[string]
+if ($includingPackages)
+{
+    for ($i = 0; $i -lt $includingPackages.Count; $i++) {
+        $item = $includingPackages[$i]
+        $includingPackagesString.Add("-inc $item")
+    }
+}
+
+$currentDate = Get-Date -Format dd_MM_yyyy
+$testBranchName = "update_deps_$currentDate"
+
+if($testBranchPrefix)
+{
+    $testBranchName = "$testBranchPrefix-$testBranchName"
+}
+
+$repoName = GetRepoName $repoAddress
+$solutionFolder = Join-Path $workingFolder $repoName
+
+## Скачиваем репу
+Write-Host "Cloning $repoName project"
+git -C $workingFolder clone $repoAddress
+# Создаём ветку
+git -C $solutionFolder checkout -b $testBranchName
 
 # Проверяем, что есть ли обновления для компонентов
-dotnet outdated -t -vl:minor -f $workingFolder
+$packagesToUpdate = GetAvailablePackagesToUpdate $solutionFolder $includingPackages
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "No updates needed!" -BackgroundColor White -ForegroundColor Green
+if ($packagesToUpdate.Count -eq 0) {
+    Write-Host "No updates needed!" -BackgroundColor White -ForegroundColor Cyan
+    ## Убираемся
+    Write-Host "Cleanup after $repoName project"
+    Remove-Item $solutionFolder -Recurse -Force
     return
 }
 
-# Текущая ветка, в которой находимся
-$oldBranch = git -C $workingFolder branch --show-current
-$currentCommit = git -C $workingFolder rev-parse HEAD
-
-# Переключаем папку на $targetBranch
-git -C $workingFolder switch $targetBranch
-# Подтягиваем изменения
-git -C $workingFolder pull origin $targetBranch
-
-# Создаём ветку
-git -C $workingFolder branch $testBranchName
-git -C $workingFolder switch $testBranchName
+# Обновляем зависимости в Build.props
+UpdatePackagesInFile $solutionFolder $packagesToUpdate
 
 # Обновляем зависимости
-dotnet outdated -t -vl:minor -u:auto $workingFolder
+dotnet outdated -vl:minor -u:auto -f $solutionFolder $includingPackages
 
 # Чекаем что все Ок
-dotnet test $workingFolder
+dotnet test $solutionFolder
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Test failed!" -BackgroundColor White -ForegroundColor Red
+    Write-Host "You have to magage it your own!" -BackgroundColor White -ForegroundColor Red
     return
 }
 
 # Коммитим и пушим
-git -C $workingFolder add .
-git -C $workingFolder commit -m "Packages updated!"
-git -C $workingFolder checkout -b $testBranchName
+git -C $solutionFolder add .
+git -C $solutionFolder commit -m "Packages updated!"
 # Создаем merge request в гитлаб
 # https://docs.gitlab.com/ee/user/project/push_options.html
-git -C $workingFolder push origin ("{0}:{1}" -f "HEAD", $testBranchName) -o merge_request.create -o merge_request.title="Packages updated"
+git -C $solutionFolder push origin ("{0}:{1}" -f "HEAD", $testBranchName) -o merge_request.create -o merge_request.title="Packages updated"
 
-# Возвращаемся на старую ветку
-git -C $workingFolder switch $oldBranch
-git -C $workingFolder revert $currentCommit -n
-git -C $workingFolder commit -m ("Revert to " -f $currentCommit)
-
- 
+## Убираемся
+Write-Host "Cleanup after $repoName project"
+Remove-Item $solutionFolder -Recurse -Force
