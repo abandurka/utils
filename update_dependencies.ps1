@@ -41,8 +41,11 @@ if($testBranchPrefix)
 $repoName = GetRepoName $repoAddress
 $solutionFolder = Join-Path $workingFolder $repoName
 
+# Проверяем, установлен ли dotnet outdated
+UpdateOrInstallTools 
+
 ## Скачиваем репу
-Write-Host "Cloning $repoName project"
+Write-Information "Cloning $repoName project"
 git -C $workingFolder clone $repoAddress
 # Создаём ветку
 git -C $solutionFolder checkout -b $testBranchName
@@ -51,9 +54,9 @@ git -C $solutionFolder checkout -b $testBranchName
 $packagesToUpdate = GetAvailablePackagesToUpdate $solutionFolder $includingPackages
 
 if ($packagesToUpdate.Count -eq 0) {
-    Write-Host "No updates needed!" -BackgroundColor White -ForegroundColor Cyan
+    Write-Information "No updates needed"
     ## Убираемся
-    Write-Host "Cleanup after $repoName project"
+    Write-Information "Сдуфт гз"
     Remove-Item $solutionFolder -Recurse -Force
     return
 }
@@ -67,18 +70,18 @@ dotnet outdated -vl:minor -u:auto -f $solutionFolder $includingPackages
 # Чекаем что все Ок
 dotnet test $solutionFolder
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Test failed!" -BackgroundColor White -ForegroundColor Red
-    Write-Host "You have to magage it your own!" -BackgroundColor White -ForegroundColor Red
+    Write-Error "Tests failed" 
+    Write-Error "You have to magage it your own"
     return
 }
 
 # Коммитим и пушим
 git -C $solutionFolder add .
-git -C $solutionFolder commit -m "Packages updated!"
+git -C $solutionFolder commit -m "Update packages"
 # Создаем merge request в гитлаб
 # https://docs.gitlab.com/ee/user/project/push_options.html
-git -C $solutionFolder push origin ("{0}:{1}" -f "HEAD", $testBranchName) -o merge_request.create -o merge_request.title="Packages updated"
+git -C $solutionFolder push origin ("{0}:{1}" -f "HEAD", $testBranchName) -o merge_request.create -o merge_request.title="Update packages"
 
 ## Убираемся
-Write-Host "Cleanup after $repoName project"
+Write-Information "Clean up"
 Remove-Item $solutionFolder -Recurse -Force

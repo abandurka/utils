@@ -85,3 +85,53 @@ function UpdatePackagesInFile {
 
     $xml.Save($pathToFile)
 }
+
+
+Function Test-CommandExists {
+    Param (
+        # Имя команды
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$command
+    )
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = ‘stop’
+    try 
+    {
+        if (Get-Command $command)
+        {
+            return $true;
+        }
+    }
+    Catch
+    {
+        return $false
+    }
+    Finally
+    {
+        $ErrorActionPreference=$oldPreference
+    }
+}
+
+function UpdateOrInstallTools {
+    Param (
+        # номер требуемой версии для dotnet-outdated.exe
+        [Parameter(Mandatory = $false, Position = 0)]
+        [string]$requiredVersion = "4.3.0"
+    )
+
+    if (Test-CommandExists "dotnet-outdated.exe")
+    {
+        $version = (Get-Command dotnet-outdated.exe).Version.ToString();
+        if ($version -ge $requiredVersion)
+        {
+            return;
+        }
+
+        Write-Information "The minimum dotnet-outdated-tool should be greater oe equal $requiredVersion"
+        Write-Information "Uninstall current version"
+        dotnet tool uninstall --global dotnet-outdated-tool
+    }
+
+    Write-Information "Install $requiredVersion version"
+    dotnet tool install --global --version $requiredVersion dotnet-outdated-tool
+}
